@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Me</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Use Inter font */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom game canvas styling */
+        canvas {
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%); /* Sky blue gradient */
+            display: block;
+            touch-action: none; /* Disable default touch actions like zoom/pan */
+        }
+        /* Simple button hover effect */
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        }
+        /* Style file input button */
+        input[type="file"]::file-chooser-button {
+            background-color: #06b6d4; /* cyan-600 */
+            color: white;
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        input[type="file"]::file-chooser-button:hover {
+            background-color: #0891b2; /* cyan-700 */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-md mx-auto">
+        <h1 class="text-4xl font-bold text-center mb-4 text-cyan-400">Flappy Me</h1>
+        
+        <!-- Customization Inputs - UPDATED -->
+        <div id="customization-panel" class="mb-4 p-4 bg-gray-800 rounded-lg shadow-lg">
+            <h2 class="text-xl font-semibold mb-3 text-center">Customize Your Game</h2>
+            <div class="space-y-4">
+                <div>
+                    <label for="player-file" class="block text-sm font-medium text-gray-300">Aapki Photo (Flappy):</label>
+                    <input type="file" id="player-file" accept="image/*" class="w-full mt-1 text-sm text-gray-400">
+                </div>
+                <div>
+                    <label for="obstacle-file" class="block text-sm font-medium text-gray-300">Rukaawat (Obstacle) Photo:</label>
+                    <input type="file" id="obstacle-file" accept="image/*" class="w-full mt-1 text-sm text-gray-400">
+                </div>
+            </div>
+            <p id="image-error" class="text-red-400 text-sm mt-3 text-center hidden">Error loading image. Using default.</p>
+        </div>
+
+        <!-- Game Canvas -->
+        <div class="relative rounded-lg overflow-hidden shadow-2xl">
+            <canvas id="gameCanvas" width="320" height="480"></canvas>
+            
+            <!-- Game Over Message -->
+            <div id="game-over-message" class="absolute inset-0 flex-col items-center justify-center bg-black bg-opacity-70 hidden">
+                <h2 class="text-4xl font-bold text-red-500">Game Over</h2>
+                <p class="text-xl mt-2">Score: <span id="final-score">0</span></p>
+                <p class="text-lg mt-1">High Score: <span id="high-score">0</span></p>
+                <button id="restart-btn" class="mt-6 bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all duration-200 shadow-md">
+                    Restart
+                </button>
+            </div>
+
+            <!-- Start Message -->
+            <div id="start-message" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50">
+                <h2 class="text-3xl font-bold text-center">Tap or Click to Start</h2>
+                <p class="text-lg mt-2">(and to flap!)</p>
+            </div>
+        </div>
+
+        <!-- Score Display -->
+        <div class="text-center mt-4">
+            <p class="text-3xl font-bold">Score: <span id="score-display">0</span></p>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Get UI elements
+        const scoreDisplay = document.getElementById('score-display');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const startMessage = document.getElementById('start-message');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const highScoreDisplay = document.getElementById('high-score');
+        const restartBtn = document.getElementById('restart-btn');
+        
+        // NEW file input elements
+        const playerFileInput = document.getElementById('player-file');
+        const obstacleFileInput = document.getElementById('obstacle-file');
+        
+        const imageErrorMsg = document.getElementById('image-error');
+        const customizationPanel = document.getElementById('customization-panel');
+
+        // Game variables
+        let player, obstacles, score, highScore, gameSpeed, frame, gameStarted, gameOver;
+        
+        // Player properties
+        const playerWidth = 34;
+        const playerHeight = 24;
+        const gravity = 0.3;
+        const jumpForce = -6.5;
+
+        // Obstacle properties
+        const obstacleWidth = 52;
+        const obstacleGap = 120;
+        const obstacleSpawnInterval = 100; // frames
+
+        // Image objects
+        let playerImage = new Image();
+        let obstacleImage = new Image();
+        let usePlayerImage = false;
+        let useObstacleImage = false;
+        
+        // --- NEW: Local URLs for uploaded files ---
+        let playerObjectUrl = null;
+        let obstacleObjectUrl = null;
+
+
+        // Image error handling
+        playerImage.onerror = () => {
+            console.error("Error loading player image.");
+            imageErrorMsg.classList.remove('hidden');
+            usePlayerImage = false;
+        };
+        playerImage.onload = () => {
+            console.log("Player image loaded.");
+            imageErrorMsg.classList.add('hidden');
+            usePlayerImage = true;
+            // Clean up old object URL to prevent memory leaks
+            if (playerObjectUrl) {
+                URL.revokeObjectURL(playerObjectUrl);
+            }
+        };
+        obstacleImage.onerror = () => {
+            console.error("Error loading obstacle image.");
+            imageErrorMsg.classList.remove('hidden');
+            useObstacleImage = false;
+        };
+        obstacleImage.onload = () => {
+            console.log("Obstacle image loaded.");
+            imageErrorMsg.classList.add('hidden');
+            useObstacleImage = true;
+             // Clean up old object URL
+            if (obstacleObjectUrl) {
+                URL.revokeObjectURL(obstacleObjectUrl);
+            }
+        };
+
+        // --- Game Functions ---
+
+        function initGame() {
+            player = {
+                x: 50,
+                y: canvas.height / 2 - playerHeight / 2,
+                width: playerWidth,
+                height: playerHeight,
+                velocityY: 0
+            };
+            obstacles = [];
+            score = 0;
+            gameSpeed = 2;
+            frame = 0;
+            gameStarted = false;
+            gameOver = false;
+            
+            scoreDisplay.textContent = '0';
+            gameOverMessage.classList.add('hidden');
+            startMessage.classList.remove('hidden');
+            customizationPanel.classList.remove('hidden');
+            
+            // Draw initial state (background)
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawPlayer();
+        }
+
+        function startGame() {
+            if (gameOver) return; // Prevent starting if game over message is up
+            gameStarted = true;
+            startMessage.classList.add('hidden');
+            customizationPanel.classList.add('hidden');
+            gameLoop();
+        }
+
+        function resetGame() {
+            // Load high score from local storage (simple persistence)
+            highScore = parseInt(localStorage.getItem('flappyHighScore')) || 0;
+            highScoreDisplay.textContent = highScore;
+            initGame();
+        }
+
+        function gameLoop() {
+            if (gameOver) {
+                showGameOver();
+                return;
+            }
+
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update & Draw Player
+            updatePlayer();
+            drawPlayer();
+
+            // Update & Draw Obstacles
+            updateObstacles();
+            drawObstacles();
+
+            // Check Collisions
+            checkCollisions();
+
+            // Update Score Display
+            scoreDisplay.textContent = score;
+
+            frame++;
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updatePlayer() {
+            player.velocityY += gravity;
+            player.y += player.velocityY;
+
+            // Prevent going off-screen (top)
+            if (player.y < 0) {
+                player.y = 0;
+                player.velocityY = 0;
+            }
+        }
+
+        function drawPlayer() {
+            if (usePlayerImage && playerImage.complete) {
+                ctx.drawImage(playerImage, player.x, player.y, player.width, player.height);
+            } else {
+                // Default player
+                ctx.fillStyle = '#FFD700'; // Gold
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+                ctx.strokeStyle = '#B8860B'; // Dark Goldenrod
+                ctx.strokeRect(player.x, player.y, player.width, player.height);
+            }
+        }
+
+        function updateObstacles() {
+            // Spawn new obstacles
+            if (frame % obstacleSpawnInterval === 0) {
+                let topHeight = Math.random() * (canvas.height - obstacleGap - 100) + 50;
+                let bottomY = topHeight + obstacleGap;
+                obstacles.push({
+                    x: canvas.width,
+                    topHeight: topHeight,
+                    bottomY: bottomY,
+                    passed: false
+                });
+            }
+
+            // Move obstacles
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= gameSpeed;
+
+                // Check for score
+                if (!obstacles[i].passed && obstacles[i].x < player.x) {
+                    score++;
+                    obstacles[i].passed = true;
+                }
+
+                // Remove off-screen obstacles
+                if (obstacles[i].x + obstacleWidth < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function drawObstacles() {
+            for (const obstacle of obstacles) {
+                if (useObstacleImage && obstacleImage.complete) {
+                    // Draw top pipe (flipped)
+                    ctx.save();
+                    ctx.translate(obstacle.x + obstacleWidth, obstacle.topHeight);
+                    ctx.scale(-1, -1);
+                    ctx.drawImage(obstacleImage, 0, 0, obstacleWidth, obstacle.topHeight);
+                    ctx.restore();
+                    
+                    // Draw bottom pipe
+                    ctx.drawImage(obstacleImage, obstacle.x, obstacle.bottomY, obstacleWidth, canvas.height - obstacle.bottomY);
+                } else {
+                    // Default obstacles
+                    ctx.fillStyle = '#228B22'; // Forest Green
+                    // Top pipe
+                    ctx.fillRect(obstacle.x, 0, obstacleWidth, obstacle.topHeight);
+                    // Bottom pipe
+                    ctx.fillRect(obstacle.x, obstacle.bottomY, obstacleWidth, canvas.height - obstacle.bottomY);
+                    
+                    ctx.strokeStyle = '#006400'; // Dark Green
+                    ctx.strokeRect(obstacle.x, 0, obstacleWidth, obstacle.topHeight);
+                    ctx.strokeRect(obstacle.x, obstacle.bottomY, obstacleWidth, canvas.height - obstacle.bottomY);
+                }
+            }
+        }
+
+        function checkCollisions() {
+            // Ground collision
+            if (player.y + player.height > canvas.height) {
+                gameOver = true;
+                return;
+            }
+
+            // Obstacle collision
+            for (const obstacle of obstacles) {
+                // Check collision with top pipe
+                if (player.x < obstacle.x + obstacleWidth &&
+                    player.x + player.width > obstacle.x &&
+                    player.y < 0 + obstacle.topHeight) {
+                    gameOver = true;
+                    return;
+                }
+                // Check collision with bottom pipe
+                if (player.x < obstacle.x + obstacleWidth &&
+                    player.x + player.width > obstacle.x &&
+                    player.y + player.height > obstacle.bottomY) {
+                    gameOver = true;
+                    return;
+                }
+            }
+        }
+
+        function showGameOver() {
+            finalScoreDisplay.textContent = score;
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('flappyHighScore', highScore);
+            }
+            highScoreDisplay.textContent = highScore;
+            gameOverMessage.classList.remove('hidden');
+        }
+
+        function playerJump() {
+            if (gameOver) return;
+            if (!gameStarted) {
+                startGame();
+            }
+            player.velocityY = jumpForce;
+        }
+
+        // --- Event Listeners ---
+        
+        // Use both 'click' and 'touchstart' for broad compatibility
+        canvas.addEventListener('mousedown', playerJump); // For mouse
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); //
+            playerJump();
+        });
+
+        // Keyboard support (Space bar)
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                playerJump();
+            }
+        });
+
+        restartBtn.addEventListener('click', () => {
+            // Need to re-init all game state
+            initGame();
+        });
+        
+        // --- NEW: Event listeners for file inputs ---
+        playerFileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                playerObjectUrl = URL.createObjectURL(file); // Create a local URL for the file
+                playerImage.src = playerObjectUrl; // Set the image source
+            }
+        });
+        
+        obstacleFileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                obstacleObjectUrl = URL.createObjectURL(file); // Create a local URL for the file
+                obstacleImage.src = obstacleObjectUrl; // Set the image source
+            }
+        });
+
+        // --- Initial Load ---
+        resetGame(); // Call resetGame on load to set up high score and init
+
+    </script>
+</body>
+</html>
